@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Find a shelf location's check character and every location that shares it.">
+<meta name="theme-color" content="#ffd53d">
+<title>Check Char Finder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: one narrow working column — search bar, a shelf-label result, then the full match list grouped by aisle. */
+:root {
+  --bg: #eef0ee;
+  --surface: #ffffff;
+  --fg: #1a1e22;
+  --muted: #5b646d;
+  --line: #d6dbdc;
+  --label: #ffd53d;
+  --label-ink: #16191c;
+  --accent: #1f5bb8;
+  --accent-soft: #e3ecfa;
+  --warn: #a8501a;
+  --warn-soft: #fbeadf;
+  --hit: #ffd53d;
+  --font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --font-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-code: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111417; --surface: #1a1f24; --fg: #e7eaec; --muted: #98a1aa; --line: #2b3238;
+    --label: #f0c22e; --label-ink: #16191c; --accent: #82aaf0; --accent-soft: #1d2a3d;
+    --warn: #f0a066; --warn-soft: #34251b; --hit: #f0c22e; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111417; --surface: #1a1f24; --fg: #e7eaec; --muted: #98a1aa; --line: #2b3238;
+  --label: #f0c22e; --label-ink: #16191c; --accent: #82aaf0; --accent-soft: #1d2a3d;
+  --warn: #f0a066; --warn-soft: #34251b; --hit: #f0c22e; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 48px;
+}
+.wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: 1.9rem; letter-spacing: .01em; margin: 0; line-height: 1.05; text-wrap: balance; }
+.sub { color: var(--muted); margin: 4px 0 0; font-size: .95rem; }
+h2 { font-family: var(--font-display); font-weight: 700; font-size: 1.25rem; margin: 0; letter-spacing: .01em; }
+.eyebrow { font-size: .72rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); font-weight: 600; }
+code, .code { font-family: var(--font-code); }
+
+form.search { display: flex; gap: 8px; }
+#q {
+  flex: 1; min-width: 0; font-family: var(--font-code); font-size: 1.5rem; font-weight: 600; text-transform: uppercase;
+  padding: 12px 14px; border: 2px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--fg);
+  letter-spacing: .06em;
+}
+#q:focus { outline: none; border-color: var(--accent); }
+button, .btn {
+  font: inherit; font-weight: 600; border-radius: 10px; border: 2px solid var(--accent); background: var(--accent);
+  color: var(--surface); padding: 0 18px; cursor: pointer;
+}
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.hint { color: var(--muted); font-size: .88rem; margin-top: 8px; }
+.hint button { background: none; border: 0; color: var(--accent); padding: 0 2px; font-family: var(--font-code); font-size: .88rem; text-decoration: underline; text-underline-offset: 2px; }
+
+/* the shelf label */
+.result { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: stretch; }
+.tag {
+  background: var(--label); color: var(--label-ink); border-radius: 6px; padding: 14px 18px;
+  display: flex; flex-direction: column; justify-content: center; min-width: 0;
+  box-shadow: 0 1px 0 rgba(0,0,0,.18), inset 0 0 0 1px rgba(0,0,0,.08);
+}
+.tag .loc { font-family: var(--font-code); font-size: 2.3rem; font-weight: 600; letter-spacing: .08em; line-height: 1; }
+.tag .say { font-family: var(--font-display); font-weight: 600; font-size: 1rem; letter-spacing: .04em; margin-top: 8px; text-transform: uppercase; overflow-wrap: anywhere; }
+.cc {
+  background: var(--surface); border: 2px solid var(--fg); border-radius: 6px; padding: 12px 18px; text-align: center;
+  display: flex; flex-direction: column; justify-content: center; min-width: 130px;
+}
+.cc .word { font-family: var(--font-display); font-weight: 700; font-size: 2rem; line-height: 1; letter-spacing: .02em; }
+.cc .eyebrow { margin-bottom: 6px; }
+.rfc { color: var(--muted); font-size: .9rem; }
+.note { padding: 10px 14px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: .92rem; }
+
+section.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.panel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
+.count { font-family: var(--font-code); font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+ul.similar { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+ul.similar li { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px; border-radius: 8px; background: var(--warn-soft); }
+ul.similar .code { font-weight: 600; font-size: 1.15rem; color: var(--fg); }
+ul.similar .why { color: var(--warn); font-size: .9rem; }
+ul.similar .say { color: var(--muted); font-size: .85rem; width: 100%; }
+.empty { color: var(--muted); font-size: .95rem; margin: 0; }
+
+.filters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.chips-toggle { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips-toggle label { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: .88rem; cursor: pointer; user-select: none; }
+.chips-toggle input { accent-color: var(--accent); margin: 0; }
+.chips-toggle label:has(input:checked) { background: var(--accent-soft); border-color: var(--accent); }
+.range { display: flex; align-items: center; gap: 6px; font-size: .9rem; color: var(--muted); }
+.range input { width: 4.2em; font-family: var(--font-code); font-size: 1rem; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+.tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn-ghost { background: transparent; color: var(--accent); padding: 6px 12px; font-size: .88rem; border-width: 1px; }
+
+.group { display: grid; grid-template-columns: 4.5rem 1fr; gap: 6px 10px; padding-block: 8px; border-top: 1px solid var(--line); }
+.group:first-of-type { border-top: 0; }
+.group-name { font-family: var(--font-display); font-weight: 700; font-size: 1rem; letter-spacing: .02em; padding-top: 3px; }
+.group-name small { display: block; font-family: var(--font-body); font-weight: 500; font-size: .72rem; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.locs { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.loc-chip { font-family: var(--font-code); font-size: .88rem; font-weight: 500; padding: 3px 6px; border-radius: 5px; background: var(--bg); border: 1px solid transparent; cursor: pointer; color: var(--fg); }
+.loc-chip:hover { border-color: var(--accent); }
+.loc-chip.self { background: var(--hit); color: var(--label-ink); font-weight: 600; }
+.loc-chip.near { border-color: var(--accent); }
+.group.current { background: var(--accent-soft); margin-inline: -16px; padding-inline: 16px; border-radius: 0; }
+.area-title { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; margin: 10px 0 0; display: flex; justify-content: space-between; gap: 8px; }
+.area-title .count { font-weight: 400; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: .82rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+.sw.self { background: var(--hit); }
+.sw.near { border: 1px solid var(--accent); background: var(--bg); }
+footer { color: var(--muted); font-size: .8rem; }
+
+/* AI search helper */
+.ai-head { display: flex; align-items: center; gap: 10px; }
+.ai-badge { font-size: .7rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); padding: 3px 8px; border-radius: 999px; }
+.ai-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-quick button { background: var(--bg); color: var(--fg); border: 1px solid var(--line); font-weight: 500; font-size: .88rem; padding: 7px 12px; border-radius: 999px; }
+.ai-quick button:hover { border-color: var(--accent); }
+#aiNote { width: 100%; min-height: 64px; resize: vertical; font: inherit; font-size: .95rem; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--fg); }
+#aiNote:focus { outline: none; border-color: var(--accent); }
+.ai-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ai-actions button { padding: 10px 16px; }
+.ai-actions .btn-ghost { padding: 9px 14px; }
+.ai-status { color: var(--muted); font-size: .88rem; }
+.ai-out { background: var(--bg); border-radius: 10px; padding: 12px 14px; font-size: .97rem; line-height: 1.5; overflow-wrap: anywhere; }
+.ai-out p { margin: 0 0 8px; }
+.ai-out p:last-child, .ai-out ul:last-child { margin-bottom: 0; }
+.ai-out ul { margin: 0 0 8px; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.ai-out .loc-chip { font-size: .85rem; padding: 1px 5px; background: var(--surface); border-color: var(--line); }
+.ai-steps { font-size: .82rem; color: var(--muted); }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: .9rem; }
+
+@media (max-width: 520px) {
+  .result { grid-template-columns: 1fr; }
+  .cc { flex-direction: row; justify-content: space-between; align-items: center; text-align: left; }
+  .cc .eyebrow { margin: 0; }
+  .tag .loc { font-size: 2rem; }
+  .group { grid-template-columns: 3.4rem 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}[hidden]{display:none!important}img{max-width:100%}</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Check Char Finder</h1>
+    <p class="sub">Type a shelf location to get its check character and every other location that shares it. You can also type a check character, like <span class="code">ECHO</span>.</p>
+  </header>
+
+  <div>
+    <form class="search" id="form" autocomplete="off">
+      <input id="q" type="text" inputmode="text" maxlength="10" spellcheck="false" value="40JH" aria-label="Shelf location or check character">
+      <button type="submit">Find</button>
+    </form>
+    <div class="hint">Try:
+      <button type="button" data-try="40JH">40JH</button>
+      <button type="button" data-try="Z41K">Z41K</button>
+      <button type="button" data-try="05IM">05IM</button>
+      <button type="button" data-try="L10A">L10A</button>
+      <button type="button" data-try="BRAVO">BRAVO</button>
+    </div>
+  </div>
+
+  <div id="result"></div>
+
+  <section class="panel" id="similarPanel" hidden>
+    <div class="panel-head">
+      <h2>Could have been voiced to</h2>
+      <span class="count" id="similarCount"></span>
+    </div>
+    <p class="empty" style="margin-top:-6px">One mistake away (a misheard character or two swapped) and using the same check character, so the headset would accept either.</p>
+    <ul class="similar" id="similar"></ul>
+  </section>
+
+  <section class="panel" id="aiPanel" hidden>
+    <div class="panel-head">
+      <div class="ai-head"><h2>Where should I look?</h2><span class="ai-badge">AI</span></div>
+    </div>
+    <p class="empty" style="margin-top:-6px">Tell Claude what happened and get a search list, most likely shelves first. It works out check characters with this app's formula, not from memory.</p>
+    <div class="ai-quick" id="aiQuick">
+      <button type="button" data-ask="I voiced stock to this location and the headset accepted it, but the stock is not on the shelf.">Stock not on the shelf</button>
+      <button type="button" data-ask="Give me the order to search shelves in, most likely first, if stock voiced here is missing.">Search order</button>
+      <button type="button" data-ask="The headset keeps rejecting the check character for this location. What could be going wrong?">Check char rejected</button>
+      <button type="button" data-ask="The label on this shelf is missing or unreadable. How do I confirm I have the right shelf?">Label missing</button>
+    </div>
+    <div class="range" id="aiCodeRow" hidden>
+      <label for="aiCode">Access code</label>
+      <input id="aiCode" type="password" autocomplete="off" style="width:10em" placeholder="Ask your manager">
+    </div>
+    <textarea id="aiNote" maxlength="600" placeholder="E.g. Voiced a TV to 40JH with ECHO yesterday, it's not there. The bay next to it was full."></textarea>
+    <div class="ai-actions">
+      <button type="button" id="aiAsk">Ask Claude</button>
+      <button type="button" class="btn-ghost" id="aiStop" hidden>Stop</button>
+      <span class="ai-status" id="aiStatus" aria-live="polite"></span>
+    </div>
+    <div class="ai-out" id="aiOut" hidden></div>
+    <div class="ai-steps" id="aiSteps" hidden></div>
+  </section>
+
+  <section class="panel" id="allPanel">
+    <div class="panel-head">
+      <h2 id="allTitle">All locations</h2>
+      <span class="count" id="allCount"></span>
+    </div>
+    <div class="filters">
+      <div class="chips-toggle" id="areas">
+        <label><input type="checkbox" id="a-std" value="std" checked> Standard</label>
+        <label><input type="checkbox" id="a-z" value="Z" checked> Bulk</label>
+        <label><input type="checkbox" id="a-l" value="L" checked> Linbin</label>
+        <label><input type="checkbox" id="a-j" value="J" checked> Jewellery</label>
+        <label><input type="checkbox" id="a-s" value="S" checked> Security</label>
+        <label><input type="checkbox" id="a-c" value="C" checked> Cash / Collection</label>
+      </div>
+      <div class="range">
+        Aisles <input id="from" type="number" min="0" max="99" value="0" aria-label="From aisle"> to <input id="to" type="number" min="0" max="99" value="99" aria-label="To aisle">
+      </div>
+    </div>
+    <div class="panel-head">
+      <div class="legend"><span><i class="sw self"></i>Your location</span><span><i class="sw near"></i>Same bay or shelf letter</span></div>
+      <div class="tools"><button type="button" class="btn-ghost" id="copy">Copy list</button><button type="button" class="btn-ghost" id="jump">Go to my aisle</button></div>
+    </div>
+    <div id="all"></div>
+  </section>
+
+  <footer>Uses the store check-character formula from the open-source CheckCheck tool. Tap any location to look it up.</footer>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(function () {
+  'use strict';
+  const P = ['ALPHA','BRAVO','CHARLIE','DELTA','ECHO','FOXTROT','GOLF','HOTEL','INDIA','JULIET','KILO','LIMA','MIKE','NOVEMBER','OSCAR','PAPA','QUEBEC','ROMEO','SIERRA','TANGO','UNIFORM','VICTOR','WHISKEY','X-RAY','YANKEE','ZULU'];
+  const N = ['ZERO','ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE'];
+  const W = [5, 7, 7, 3];
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  const PW = { J: 'JEWELLERY', S: 'SECURITY', L: 'LINBIN', Z: 'BULK' };
+  const FIXED = { DPA: 'VICTOR', SOB: 'SIERRA' };
+  const RETURNS = ['RETS', 'RETUR', 'RETURN', 'RETURNS'];
+  const pats = [/^\d\d[A-Z][A-Z]$/, /^[JS]\d[A-Z][A-Z]$/, /^[LZ]\d\d[A-Z]$/, /^C[AP]\d\d$/];
+  const isLoc = l => pats.some(p => p.test(l));
+
+  const cc = l => P[l.split('').slice(0, 4).reduce((s, c, i) => s + c.charCodeAt(0) * W[i], 0) % 26];
+  const rfc = l => { const t = l.split('').reduce((s, c, i) => s + (c.charCodeAt(0) - 65) * W[i], 45) % 99; return N[Math.floor(t / 10)] + ' ' + N[t % 10]; };
+  const sp = c => /\d/.test(c) ? N[+c] : (/[A-Z]/.test(c) ? P[c.charCodeAt(0) - 65] : '?');
+  function say(l) {
+    const w = l.split('').map(sp);
+    if (l.length === 4 && l[3] === '+') return 'AFTER ' + w.slice(0, 3).join(' ');
+    if (l.length === 4 && l[3] === '-') return 'BEFORE ' + w.slice(0, 3).join(' ');
+    if (/^C[AP]/.test(l)) return (l[1] === 'A' ? 'CASH OFFICE ' : 'COLLECTION POINT ') + w.slice(2).join(' ');
+    if (/^[JS]\d/.test(l)) return PW[l[0]] + ' ' + w.slice(1).join(' ');
+    if (/^[LZ]\d\d/.test(l)) return w.slice(1, 3).join(' ') + ' ' + PW[l[0]] + ' ' + w[3];
+    return w.join(' ');
+  }
+  const wordAt = (l, i) => (i === 0 && PW[l[0]]) || sp(l[i]);
+
+  function similar(l) {
+    if (!isLoc(l)) return [];
+    const c = cc(l), out = new Map();
+    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    const consider = (x, why) => { if (x !== l && !out.has(x) && isLoc(x) && cc(x) === c) out.set(x, why); };
+    for (let i = 0; i < 4; i++) for (const ch of chars) { const x = l.slice(0, i) + ch + l.slice(i + 1); consider(x, wordAt(x, i) + ' heard as ' + wordAt(l, i)); }
+    for (let i = 0; i < 3; i++) {
+      const a = l.split('');
+      if (/\d/.test(a[i]) === /\d/.test(a[i + 1])) { [a[i], a[i + 1]] = [a[i + 1], a[i]]; consider(a.join(''), wordAt(l, i) + ' and ' + wordAt(l, i + 1) + ' swapped'); }
+    }
+    return [...out].map(([loc, why]) => ({ loc, why }));
+  }
+
+  // Every location of every area, built once and grouped by check character.
+  const index = {};
+  function add(c, area, group, loc) {
+    ((index[c] = index[c] || {})[area] = index[c][area] || {});
+    (index[c][area][group] = index[c][area][group] || []).push(loc);
+  }
+  for (let i = 0; i < 100; i++) {
+    const a = String(i).padStart(2, '0');
+    for (const x of A) {
+      for (const y of A) add(cc(a + x + y), 'std', a, a + x + y);
+      add(cc('Z' + a + x), 'Z', a, 'Z' + a + x);
+      add(cc('L' + a + x), 'L', a, 'L' + a + x);
+    }
+    add(cc('CA' + a), 'C', 'Cash office', 'CA' + a);
+    add(cc('CP' + a), 'C', 'Collection point', 'CP' + a);
+  }
+  for (let d = 0; d < 10; d++) for (const x of A) for (const y of A) {
+    add(cc('J' + d + x + y), 'J', String(d), 'J' + d + x + y);
+    add(cc('S' + d + x + y), 'S', String(d), 'S' + d + x + y);
+  }
+  const AREA_NAME = { std: 'Standard shelves', Z: 'Bulk', L: 'Linbin', J: 'Jewellery', S: 'Security', C: 'Cash office and collection point' };
+  const AREA_ORDER = ['std', 'Z', 'L', 'J', 'S', 'C'];
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  let state = { loc: null, check: null };
+
+  function aisleOf(l) {
+    if (!l) return null;
+    if (/^\d\d/.test(l)) return l.slice(0, 2);
+    if (/^[LZ]\d\d/.test(l)) return l.slice(1, 3);
+    return null;
+  }
+
+  function run(raw) {
+    const q = raw.trim().toUpperCase().replace(/\s+/g, '');
+    $('q').value = q;
+    const res = $('result');
+    $('similarPanel').hidden = true;
+    if (!q) { res.innerHTML = ''; state = { loc: null, check: null }; renderAll(); return; }
+
+    const word = q === 'XRAY' ? 'X-RAY' : q;
+    if (P.includes(word)) {
+      state = { loc: null, check: word };
+      res.innerHTML = '<div class="result"><div class="tag"><span class="eyebrow" style="color:inherit;opacity:.7">Check character</span><span class="loc">' + esc(word) + '</span><span class="say">Showing every location that uses it</span></div></div>';
+      renderAll(); save(q); return;
+    }
+
+    if (RETURNS.includes(q)) {
+      state = { loc: null, check: null };
+      res.innerHTML = tagHtml('RETS', 'RETURNS', 'FOUR EIGHT / OSCAR', null, null);
+      renderAll(); save(q); return;
+    }
+    const l = q.slice(0, 4);
+    if (FIXED[l.slice(0, 3)]) {
+      state = { loc: null, check: null };
+      res.innerHTML = tagHtml(l.slice(0, 3), l.slice(0, 3), FIXED[l.slice(0, 3)], null, null);
+      renderAll(); save(q); return;
+    }
+    if (l.length < 4) {
+      state = { loc: null, check: null };
+      res.innerHTML = '<p class="note">Enter all four characters of the location, for example 40JH, Z41K or L10A.</p>';
+      renderAll(); return;
+    }
+    const c = cc(l);
+    const known = isLoc(l);
+    const rfcVal = /^[A-Z]{4}$/.test(l) ? rfc(l) : null;
+    const warn = known || /[+-]$/.test(l) ? null : 'This doesn’t match a standard location format (like 40JH, J1PG, Z10A, L10A or CA12), so check you typed it right. The check character is still worked out from the four characters.';
+    state = { loc: l, check: c };
+    res.innerHTML = tagHtml(l, say(l), c, rfcVal, warn);
+
+    const sim = similar(l);
+    $('similarPanel').hidden = false;
+    $('similarCount').textContent = sim.length ? sim.length + ' found' : '';
+    $('similar').innerHTML = sim.length
+      ? sim.map(s => '<li><span class="code">' + esc(s.loc) + '</span><span class="why">' + esc(s.why) + '</span><span class="say">' + esc(say(s.loc)) + '</span></li>').join('')
+      : '<li style="background:var(--bg)"><span class="empty">None. A single mishearing of ' + esc(l) + ' would give a different check character, so the headset would have rejected it.</span></li>';
+
+    const ai = aisleOf(l);
+    if (ai !== null) { const n = +ai; if (n < +$('from').value || n > +$('to').value) { $('from').value = 0; $('to').value = 99; } }
+    renderAll(); save(q);
+  }
+
+  function tagHtml(loc, spoken, check, rfcVal, warn) {
+    return '<div class="result"><div class="tag"><span class="loc">' + esc(loc) + '</span><span class="say">' + esc(spoken) + '</span></div>' +
+      '<div class="cc"><span class="eyebrow">Check char</span><span class="word">' + esc(check) + '</span></div></div>' +
+      (rfcVal ? '<p class="rfc">RFC check digits: <strong class="code">' + esc(rfcVal) + '</strong></p>' : '') +
+      (warn ? '<p class="note">' + esc(warn) + '</p>' : '');
+  }
+
+  function renderAll() {
+    const box = $('all');
+    if (!state.check) { $('allTitle').textContent = 'All locations'; $('allCount').textContent = ''; box.innerHTML = '<p class="empty">Enter a location or check character above to list every location that shares it.</p>'; return; }
+    $('allTitle').textContent = 'All ' + state.check + ' locations';
+    const from = Math.max(0, Math.min(99, +$('from').value || 0));
+    const to = Math.max(from, Math.min(99, +$('to').value || 99));
+    const on = new Set([...document.querySelectorAll('#areas input:checked')].map(i => i.value));
+    const self = state.loc, myAisle = aisleOf(self);
+    const bay = self && /^\d\d/.test(self) ? self[2] : null;
+    let html = '', total = 0;
+    for (const area of AREA_ORDER) {
+      if (!on.has(area)) continue;
+      const groups = (index[state.check] || {})[area] || {};
+      let keys = Object.keys(groups);
+      if (area === 'std' || area === 'Z' || area === 'L') keys = keys.filter(k => +k >= from && +k <= to).sort();
+      else keys.sort();
+      const n = keys.reduce((s, k) => s + groups[k].length, 0);
+      if (!n) continue;
+      total += n;
+      html += '<h3 class="area-title">' + AREA_NAME[area] + '<span class="count">' + n + '</span></h3>';
+      if (area === 'Z' || area === 'L') {
+        html += '<div class="locs" style="padding-block:6px">' + keys.map(k => chip(groups[k][0], self, null, myAisle === k)).join('') + '</div>';
+        continue;
+      }
+      for (const k of keys) {
+        const cur = area === 'std' && k === myAisle && /^\d\d/.test(self || '');
+        const label = area === 'std' ? k + '<small>Aisle</small>' : area === 'C' ? esc(k.split(' ')[0]) + '<small>' + esc(k.split(' ').slice(1).join(' ') || '') + '</small>' : area + k + '<small>' + (area === 'J' ? 'Jewellery' : 'Security') + '</small>';
+        html += '<div class="group' + (cur ? ' current' : '') + '" data-aisle="' + (area === 'std' ? k : '') + '"><div class="group-name">' + label + '</div><div class="locs">' +
+          groups[k].map(x => chip(x, self, bay, false)).join('') + '</div></div>';
+      }
+    }
+    $('allCount').textContent = total + ' locations';
+    box.innerHTML = html || '<p class="empty">No locations match these filters. Turn on more areas or widen the aisle range.</p>';
+  }
+
+  function chip(x, self, bay, nearFlag) {
+    let cls = 'loc-chip';
+    if (x === self) cls += ' self';
+    else if (nearFlag || (bay && /^\d\d/.test(x) && x[2] === bay)) cls += ' near';
+    return '<button type="button" class="' + cls + '" data-loc="' + x + '">' + x + '</button>';
+  }
+
+  function toast(msg) { const t = $('toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 1800); }
+  function save(q) { try { localStorage.setItem('ccf-last', q); localStorage.setItem('ccf-range', $('from').value + '-' + $('to').value); } catch (e) {} }
+
+  $('form').addEventListener('submit', e => { e.preventDefault(); run($('q').value); });
+  document.querySelectorAll('[data-try]').forEach(b => b.addEventListener('click', () => run(b.dataset.try)));
+  $('all').addEventListener('click', e => { const b = e.target.closest('[data-loc]'); if (b) { run(b.dataset.loc); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
+  $('areas').addEventListener('change', renderAll);
+  ['from', 'to'].forEach(id => $(id).addEventListener('input', () => { renderAll(); save($('q').value); }));
+  $('jump').addEventListener('click', () => {
+    const a = aisleOf(state.loc);
+    const el = a && document.querySelector('.group[data-aisle="' + a + '"]');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); else toast('No aisle to jump to for this search');
+  });
+  $('copy').addEventListener('click', () => {
+    const text = [...document.querySelectorAll('#all .loc-chip')].map(b => b.dataset.loc).join(', ');
+    if (!text) { toast('Nothing to copy yet'); return; }
+    const done = () => toast('Copied ' + text.split(', ').length + ' locations');
+    try {
+      navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+    } catch (e) { fallbackCopy(text, done); }
+  });
+  function fallbackCopy(text, done) {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) { toast('Select the list and copy it manually'); }
+    ta.remove();
+  }
+
+  // ---- AI search helper (asks Claude on the viewer's own account) ----
+  const LOC_RE = /\b(\d\d[A-Z]{2}|[JS]\d[A-Z]{2}|[LZ]\d\d[A-Z]|C[AP]\d\d)\b/g;
+  function neighbours(l) {
+    const out = [];
+    const push = (x, rel) => { if (x && x !== l && isLoc(x)) out.push({ location: x, relation: rel, checkChar: cc(x) }); };
+    const shift = (ch, d) => { const c = String.fromCharCode(ch.charCodeAt(0) + d); return /[A-Z]/.test(c) ? c : null; };
+    if (/^(\d\d|[JS]\d)[A-Z][A-Z]$/.test(l)) {
+      for (const d of [-1, 1]) { const s = shift(l[3], d); if (s) push(l.slice(0, 3) + s, d < 0 ? 'shelf before' : 'shelf after'); }
+      for (const d of [-1, 1]) { const b = shift(l[2], d); if (b) push(l.slice(0, 2) + b + l[3], d < 0 ? 'same shelf, bay before' : 'same shelf, bay after'); }
+      push(l.slice(0, 2) + l[3] + l[2], 'bay and shelf letters swapped');
+    }
+    if (/^\d\d/.test(l)) {
+      const n = +l.slice(0, 2);
+      for (const d of [-1, 1]) { const a = n + d; if (a >= 0 && a <= 99) push(String(a).padStart(2, '0') + l.slice(2), d < 0 ? 'same bay and shelf, aisle before' : 'same bay and shelf, aisle after'); }
+      push(l[1] + l[0] + l.slice(2), 'aisle digits swapped');
+    }
+    if (/^[LZ]\d\d[A-Z]$/.test(l)) {
+      for (const d of [-1, 1]) { const s = shift(l[3], d); if (s) push(l.slice(0, 3) + s, d < 0 ? 'letter before' : 'letter after'); }
+      push(l[0] + l[2] + l[1] + l[3], 'aisle digits swapped');
+    }
+    return out;
+  }
+  function lookup(raw) {
+    const l = String(raw || '').toUpperCase().replace(/\s+/g, '').slice(0, 4);
+    if (l.length < 4) throw new Error('A location needs four characters, like 40JH or Z41K.');
+    return { location: l, readOut: say(l), checkChar: cc(l), validFormat: isLoc(l),
+      oneMistakeMatches: similar(l).map(s => ({ location: s.loc, mistake: s.why })), neighbours: neighbours(l) };
+  }
+  const AREA_KEYS = { standard: 'std', bulk: 'Z', linbin: 'L', jewellery: 'J', security: 'S', cash_collection: 'C' };
+  const aiTools = [
+    { name: 'lookup_location',
+      description: 'Look up one location. Returns its read-out, check character, locations one headset mistake away that share the check character, and its physical neighbours with their check characters.',
+      inputSchema: { type: 'object', properties: { location: { type: 'string', description: 'Four-character location such as 40JH, Z41K, L10A, J5IM or CA12' } }, required: ['location'] },
+      execute: (i) => lookup(i.location) },
+    { name: 'list_locations_with_check_char',
+      description: 'List every location that uses a check character, in one area, optionally limited to an aisle range. Returns at most 120 locations.',
+      inputSchema: { type: 'object', properties: {
+        checkChar: { type: 'string', description: 'NATO phonetic word, e.g. ECHO' },
+        area: { type: 'string', enum: Object.keys(AREA_KEYS) },
+        fromAisle: { type: 'integer', minimum: 0, maximum: 99 }, toAisle: { type: 'integer', minimum: 0, maximum: 99 } }, required: ['checkChar', 'area'] },
+      execute: (i) => {
+        const c = String(i.checkChar || '').toUpperCase().replace(/^XRAY$/, 'X-RAY');
+        if (!P.includes(c)) throw new Error('Unknown check character ' + c);
+        const area = AREA_KEYS[String(i.area)]; if (!area) throw new Error('Unknown area');
+        const f = Number.isFinite(+i.fromAisle) ? +i.fromAisle : 0, t = Number.isFinite(+i.toAisle) ? +i.toAisle : 99;
+        const g = (index[c] || {})[area] || {};
+        let list = Object.keys(g).filter(k => !['std', 'Z', 'L'].includes(area) || (+k >= f && +k <= t)).sort().flatMap(k => g[k]);
+        return { checkChar: c, area: i.area, count: list.length, locations: list.slice(0, 120), truncated: list.length > 120 };
+      } }
+  ];
+  const AI_RULES = [
+    'You help a colleague in a retail stockroom find stock that may have been voiced to the wrong shelf with a voice headset.',
+    'How locations work: standard shelves are aisle (2 digits) + bay letter + shelf letter, e.g. 40JH is read "FOUR ZERO JULIET HOTEL". J = jewellery and S = security (one digit then bay and shelf, e.g. J5IM). Bulk is Z + 2-digit aisle + letter (Z41K = "FOUR ONE BULK KILO"), linbin is L + 2-digit aisle + letter, CA = cash office, CP = collection point.',
+    'Every location has a check character (a phonetic word). When voicing stock, the colleague says the location, then the check character printed on the shelf label; the headset only accepts it if that check character belongs to the location it heard. So stock can only end up booked to a location whose check character matches the one spoken. It can also physically be on a different shelf than the one it is booked to if someone read the wrong label.',
+    'Never work out a check character yourself. Use the facts given below and call the tools for any other location.',
+    'Answer with: a short prioritised list of up to 6 places to check, most likely first, each as "- CODE: reason" in a few words; then one line of practical advice. Under 140 words, plain text, no headings. Write location codes exactly as codes (40JH, Z14K) so the app can make them tappable. If the question is not about stock locations, say briefly that you can only help with finding locations.'
+  ].join('\n');
+
+  // On Netlify (or any host with the /api/ask function) the page asks Claude through
+  // that server function instead; inside Claude it uses the built-in sample capability.
+  const AI_ENDPOINT = '/api/ask';
+  let aiSample = null, aiRemote = false, aiCtl = null;
+  function aiCode() { return ($('aiCode').value || '').trim(); }
+  async function askRemote(userText, signal, runTool) {
+    const messages = [{ role: 'user', content: userText }];
+    for (let round = 0; round < 5; round++) {
+      let res, data;
+      try {
+        res = await fetch(AI_ENDPOINT, { method: 'POST', signal, headers: { 'content-type': 'application/json', 'x-access-code': aiCode() }, body: JSON.stringify({ messages }) });
+        data = await res.json().catch(() => ({}));
+      } catch (e) { throw { code: e && e.name === 'AbortError' ? 'cancelled' : 'upstream_error' }; }
+      if (!res.ok) throw { code: data.code || 'upstream_error', message: data.error || '' };
+      const blocks = Array.isArray(data.content) ? data.content : [];
+      const text = blocks.filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+      const uses = blocks.filter(b => b.type === 'tool_use');
+      if (data.stop_reason !== 'tool_use' || !uses.length) {
+        if (!text) throw { code: 'empty_completion' };
+        return { text, truncated: data.stop_reason === 'max_tokens' };
+      }
+      messages.push({ role: 'assistant', content: blocks });
+      messages.push({ role: 'user', content: uses.map(u => {
+        try { return { type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(runTool(u.name, u.input || {})) }; }
+        catch (e) { return { type: 'tool_result', tool_use_id: u.id, content: 'Error: ' + (e && e.message || 'failed'), is_error: true }; }
+      }) });
+    }
+    throw { code: 'upstream_error' };
+  }
+  function renderAnswer(text) {
+    const out = $('aiOut');
+    const lines = esc(text).split('\n');
+    let html = '', inList = false;
+    for (let line of lines) {
+      line = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      const isItem = /^\s*([-*•]|\d+[.)])\s+/.test(line);
+      if (isItem) { if (!inList) { html += '<ul>'; inList = true; } html += '<li>' + line.replace(/^\s*([-*•]|\d+[.)])\s+/, '') + '</li>'; }
+      else { if (inList) { html += '</ul>'; inList = false; } if (line.trim()) html += '<p>' + line + '</p>'; }
+    }
+    if (inList) html += '</ul>';
+    out.innerHTML = html.replace(LOC_RE, m => '<button type="button" class="loc-chip" data-loc="' + m + '">' + m + '</button>');
+    out.hidden = false;
+  }
+  function aiMessage(code) {
+    return ({ rate_limited: 'Claude is busy or your usage limit was reached. Try again in a little while.',
+      session_expired: 'Sign in to Claude again, then try once more.',
+      bad_code: 'That access code isn’t right. Check it and try again.',
+      not_configured: 'The AI helper isn’t set up on this site yet (no API key).', refused: 'Claude couldn’t answer that. Try describing the problem differently.',
+      empty_completion: 'Claude didn’t send an answer. Try a shorter question.', prompt_too_large: 'That note is too long. Shorten it and try again.' })[code]
+      || 'Something went wrong reaching Claude. Try again.';
+  }
+  async function askAI(extra) {
+    if (!aiSample && !aiRemote) return;
+    if (typeof extra === 'string') $('aiNote').value = extra;
+    const note = $('aiNote').value.trim();
+    if (!state.loc && !state.check) { $('aiStatus').textContent = 'Look up a location first.'; return; }
+    if (!note) { $('aiStatus').textContent = 'Type what happened, or tap one of the buttons above.'; $('aiNote').focus(); return; }
+    let facts;
+    if (state.loc) facts = 'Location being searched for: ' + JSON.stringify(lookup(state.loc));
+    else facts = 'The colleague is asking about check character ' + state.check + ' (no single location given).';
+    const prompt = AI_RULES + '\n\nFacts from the app (already worked out with the real formula):\n' + facts + '\n\nColleague’s note: ' + note.slice(0, 600);
+    aiCtl?.abort(); aiCtl = new AbortController();
+    const steps = [];
+    $('aiAsk').disabled = true; $('aiStop').hidden = false; $('aiStatus').textContent = 'Thinking…';
+    $('aiOut').hidden = true; $('aiSteps').hidden = true;
+    if (!aiSample) {
+      const logStep = (name, input) => {
+        steps.push(name === 'lookup_location' ? 'Checked ' + String(input.location || '').toUpperCase() : 'Listed ' + String(input.checkChar || '').toUpperCase() + ' ' + String(input.area || '') + ' locations');
+        $('aiSteps').textContent = steps.join(' · '); $('aiSteps').hidden = false;
+      };
+      const runTool = (name, input) => { const t = aiTools.find(x => x.name === name); if (!t) throw new Error('Unknown tool'); logStep(name, input); return t.execute(input); };
+      try { localStorage.setItem('ccf-code', aiCode()); } catch (e) {}
+      try {
+        const r = await askRemote('Facts from the app (already worked out with the real formula):\n' + facts + '\n\nColleague’s note: ' + note.slice(0, 600), aiCtl.signal, runTool);
+        renderAnswer(r.text);
+        $('aiStatus').textContent = r.truncated ? 'The answer was cut short. Ask a narrower question.' : '';
+      } catch (e) {
+        const code = e && e.code;
+        if (code !== 'cancelled') $('aiOut').hidden = true;
+        if (code === 'bad_code') { $('aiCodeRow').hidden = false; $('aiCode').focus(); }
+        $('aiStatus').textContent = code === 'cancelled' ? 'Stopped.' : aiMessage(code);
+      } finally { $('aiAsk').disabled = false; $('aiStop').hidden = true; }
+      return;
+    }
+    const caps = await aiSample.limits().catch(() => null);
+    const tools = caps && caps.tools ? aiTools.map(t => Object.assign({}, t, { execute: (input) => {
+      steps.push(t.name === 'lookup_location' ? 'Checked ' + String(input.location || '').toUpperCase() : 'Listed ' + String(input.checkChar || '').toUpperCase() + ' ' + String(input.area || '') + ' locations');
+      $('aiSteps').textContent = steps.join(' · '); $('aiSteps').hidden = false;
+      return t.execute(input);
+    } })) : undefined;
+    try {
+      const opts = { signal: aiCtl.signal, onText: ({ text }) => { $('aiStatus').textContent = ''; renderAnswer(text); } };
+      if (tools) opts.tools = tools; else opts.cache = false;
+      const r = await aiSample(prompt, opts);
+      renderAnswer(r.text);
+      $('aiStatus').textContent = r.truncated ? 'The answer was cut short. Ask a narrower question.' : '';
+    } catch (e) {
+      const code = e && e.code;
+      if (e && e.text) renderAnswer(e.text); else if (code !== 'cancelled') $('aiOut').hidden = true;
+      if (code === 'not_granted' || code === 'sampling_disabled' || code === 'not_declared' || code === 'capability_disabled' || code === 'capability_removed') { $('aiPanel').hidden = true; }
+      else $('aiStatus').textContent = code === 'cancelled' ? 'Stopped.' : aiMessage(code);
+    } finally {
+      $('aiAsk').disabled = false; $('aiStop').hidden = true;
+    }
+  }
+  $('aiAsk').addEventListener('click', () => askAI());
+  $('aiStop').addEventListener('click', () => aiCtl?.abort());
+  $('aiQuick').addEventListener('click', e => { const b = e.target.closest('[data-ask]'); if (b) askAI(b.dataset.ask); });
+  $('aiOut').addEventListener('click', e => { const b = e.target.closest('[data-loc]'); if (b) { run(b.dataset.loc); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
+  (async () => {
+    try {
+      if (window.claude && typeof window.claude.use === 'function') {
+        aiSample = await window.claude.use('sample');
+        if (aiSample) $('aiPanel').hidden = false;
+      }
+    } catch (e) { aiSample = null; }
+    if (aiSample || !/^https?:$/.test(location.protocol) || location.hostname.endsWith('claude.ai') || location.hostname.endsWith('claudeusercontent.com')) return;
+    try {
+      const res = await fetch(AI_ENDPOINT, { method: 'GET', headers: { accept: 'application/json' } });
+      const info = res.ok ? await res.json() : null;
+      if (info && info.ok) {
+        aiRemote = true;
+        $('aiPanel').hidden = false;
+        if (info.needsCode) { $('aiCodeRow').hidden = false; try { $('aiCode').value = localStorage.getItem('ccf-code') || ''; } catch (e) {} }
+        if (!info.configured) $('aiStatus').textContent = aiMessage('not_configured');
+        document.querySelector('#aiPanel .empty').textContent = 'Tell Claude what happened and get a search list, most likely shelves first. It works out check characters with this app’s formula, not from memory.';
+      }
+    } catch (e) { /* no AI backend on this host */ }
+  })();
+
+  let start = '40JH';
+  try {
+    const last = localStorage.getItem('ccf-last'); if (last) start = last;
+    const r = localStorage.getItem('ccf-range'); if (r) { const [f, t] = r.split('-'); $('from').value = f; $('to').value = t; }
+  } catch (e) {}
+  run(start);
+})();
+</script>
+
+</body>
+</html>

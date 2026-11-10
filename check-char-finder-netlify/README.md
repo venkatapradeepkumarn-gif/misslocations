@@ -13,6 +13,11 @@ netlify.toml                 Netlify settings
 
 ## Deploy
 
+This repository includes a root `netlify.toml` that sets this folder as the base
+directory, publishes `site`, and deploys `netlify/functions`. When connecting the
+whole repository, leave the dashboard build command and base directory empty so
+the root configuration applies. No build command is required for this static app.
+
 1. Push this folder to a GitHub repository (or use the Netlify CLI, below).
 2. In Netlify: **Add new site > Import an existing project**, pick the repository. Leave the build command empty; the publish directory is read from `netlify.toml`.
 3. In **Site configuration > Environment variables**, add:
